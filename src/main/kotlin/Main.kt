@@ -1,12 +1,12 @@
 package org.example
 
-import com.xenomachina.argparser.ArgParser
-import com.xenomachina.argparser.default
+import com.xenomachina.argparser.*
 import java.io.File
+import kotlin.system.exitProcess
 
-class MyArgs(parser: ArgParser) {
-    val root by parser.storing("--root", help = "The path to root project").default<String>("./temp")
-    val output by parser.storing("--output", help = "The path to output project").default<String>("output.txt")
+class Args(parser: ArgParser) {
+    val root by parser.storing("--root", help = "The path to root folder").default<String>("./temp")
+    val output by parser.storing("--output", help = "The path to output file").default<String>("output.txt")
 }
 
 
@@ -14,59 +14,64 @@ interface ITextChunk {
     fun renderText(): String
 }
 
-class TextChunk(text: String) : ITextChunk {
-    private val text: String = ""
+class TextChunk(private val text: String) : ITextChunk {
     override fun renderText(): String {
         return text
     }
 }
 
 
-class FileNode(filePath: String) : ITextChunk {
-
-    val path: String = ""
+class FileNode(val path: String) : ITextChunk {
     val children: MutableList<FileNode> = emptyList<FileNode>().toMutableList()
     val textChunks = mutableListOf<ITextChunk>()
     override fun renderText(): String {
-        return textChunks.map { textChunks->textChunks.renderText() }.joinToString()
+        return textChunks.joinToString("\n") { textChunks -> textChunks.renderText() }
     }
-
 }
 
-
 fun main(args: Array<String>) {
-    val myArgs = MyArgs(ArgParser(args))
-    val root: String = myArgs.root
-    val output = myArgs.output
+    mainBody {
+        val myArgs: Args?
+        try {
 
-    val nodeMap = hashMapOf<String, FileNode>()
-    val resultingList = File(root)
-        .walkTopDown()
-        .filter { it.isFile }
-        .sortedBy { it.name }
-    val resultFile = File(output)
-    resultFile.writer().use { writer -> resultingList.forEach { writer.write(it.readText()) } }
+            myArgs = Args(ArgParser(args))
+        } catch (e: SystemExitException) {
+            exitProcess(0)
+        }
+        val root: String = myArgs.root
+        val output = myArgs.output
 
-    val rootFile = File(root)
-    for (file in rootFile.walkTopDown()) {
-        if (file.isFile) {
-            fillRequirements(file, nodeMap, rootFile)
+        val nodeMap = hashMapOf<String, FileNode>()
+        val resultingList = File(root)
+            .walkTopDown()
+            .filter { it.isFile }
+            .sortedBy { it.name }
+        val resultFile = File(output)
+        resultFile.writer().use { writer -> resultingList.forEach { writer.write(it.readText()) } }
+
+        val rootFile = File(root)
+        for (file in rootFile.walkTopDown()) {
+            if (file.isFile) {
+                fillRequirements(file, nodeMap, rootFile)
+            }
+        }
+
+
+        val sortedFiles = topologicalSort(nodeMap)
+
+        sortedFiles?.let {
+            val listOfPaths = nodeMap.keys.toList().sorted()
+            resultFile.bufferedWriter()
+                .use { writer -> listOfPaths.forEach { path -> writer.write(nodeMap[path]!!.renderText() + "\n") } }
+
+            println("Sorted list:")
+            sortedFiles.forEach {
+                println(it)
+            }
+        } ?: {
+            println("Cycle")
         }
     }
-
-    val sortedFiles = topologicalSort(nodeMap)
-
-    if (sortedFiles != null) {
-        println("Topologically sorted list:")
-        sortedFiles.forEach {
-            println(it)
-            println(nodeMap[it]!!.renderText())
-        }
-    } else {
-        println("A cyclic dependency was detected.")
-    }
-
-
 }
 
 fun fillRequirements(file: File, nodeMap: HashMap<String, FileNode>, rootFile: File) {
@@ -87,13 +92,13 @@ fun fillRequirements(file: File, nodeMap: HashMap<String, FileNode>, rootFile: F
 
 fun topologicalSort(nodeMap: HashMap<String, FileNode>): List<String>? {
     val sortedList = mutableListOf<String>()
-    val visited = mutableMapOf<String, Boolean>()  // Track visited nodes
-    val recStack = mutableMapOf<String, Boolean>()  // Track the recursion stack to detect cycles
+    val visited = mutableMapOf<String, Boolean>()
+    val recStack = mutableMapOf<String, Boolean>()
 
     for (node in nodeMap.values) {
         if (visited[node.path] != true) {
             if (!dfs(node, visited, recStack, sortedList)) {
-                return null  // A cycle was detected
+                return null
             }
         }
     }
@@ -109,11 +114,11 @@ fun dfs(
 ): Boolean {
     if (recStack[node.path] == true) {
         println("Cycle detected: ${getCyclePath(node.path, recStack)}")
-        return false  // Cycle detected
+        return false
     }
 
     if (visited[node.path] == true) {
-        return true  // Already processed, skip
+        return true
     }
 
     visited[node.path] = true
@@ -121,12 +126,12 @@ fun dfs(
 
     for (child in node.children) {
         if (!dfs(child, visited, recStack, sortedList)) {
-            return false  // Cycle detected in recursion
+            return false
         }
     }
 
     recStack[node.path] = false
-    sortedList.add(0, node.path)  // Add to the sorted list
+    sortedList.add(0, node.path)
 
     return true
 }
